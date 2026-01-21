@@ -109,6 +109,7 @@ Deep-dives into how the cloud actually works.
 - **Resources:**
   - [DesignGurus: Log Aggregation from Millions of Servers](https://www.designgurus.io/answers/detail/how-would-you-design-a-log-aggregation-system-that-collects-and-indexes-logs-from-millions-of-servers)
   - [Dev.to: Scalable ELK Infrastructure](https://dev.to/chaira/building-a-scalable-secure-elk-stack-infrastructure-a-practical-guide-37hb)
+  - [Designing a Scalable Centralized Logging System](https://medium.com/@rahulgargblog/designing-a-scalable-centralized-logging-system-f99172c2e89b)
 
 ### [15] Distributed Task Scheduler (Airflow)
 - **Key Concepts:** High Availability of scheduler, avoiding double execution, retry mechanisms.
