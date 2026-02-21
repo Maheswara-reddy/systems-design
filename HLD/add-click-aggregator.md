@@ -81,3 +81,54 @@ Handling events delayed by network drops (e.g., losing signal in a tunnel):
 * **Allowed Lateness:** For events that arrive *after* the watermark has passed, configure the stream processor to emit an "Upsert" command. Because the NoSQL database uses `ad_id` and `timestamp` as keys, it seamlessly overwrites the old aggregate with the newly incremented total.
 
 ---
+
+
+## Cassandra is famous for high write speeds but how does it handle the reads?
+- Can it handle the fast read speeds required by the dashboards?
+    - The answer is **yes, but only if you perfectly predict every single way the dashboard will be used.** Here is exactly how Cassandra handles the dashboard reads, where it falls apart, and how senior engineers fix it.
+
+### 1. Where Cassandra Excels: The Predictable Dashboard
+
+If your dashboard opens and immediately loads a chart showing the clicks for a specific ad over the last 24 hours, Cassandra is incredibly fast.
+
+* **The Query:** `SELECT * FROM ad_clicks WHERE ad_id = 123 AND date_bucket = '2026-02-22' AND minute_timestamp > '10:00:00'`
+* **Why it's fast:** Because `ad_id` and `date_bucket` are your Partition Keys, Cassandra does an O(1) hash lookup, goes directly to a single server node, and sequentially reads the time-series data right off the disk. It will return this data in single-digit milliseconds.
+
+### 2. Where Cassandra Fails: The "Slice and Dice" Dashboard
+
+Dashboards usually have dropdown filters. What happens when an advertiser logs in and says, *"I want to see the total clicks across **all** my ads, but only for users in India on mobile devices"?*
+
+If your query doesn't include the `ad_id` (the Partition Key), Cassandra panics.
+
+* It doesn't know which node holds the data.
+* It is forced into a **Scatter-Gather** anti-pattern, sending the query to every single node in the cluster.
+* If your cluster has 50 nodes, the coordinator node has to wait for 50 responses, filter out the non-India/non-mobile clicks in memory, and merge the results.
+* Read latency spikes from 5ms to 5 seconds (or the query simply times out). The dashboard crashes.
+
+### 3. The Cassandra Solution: Denormalization
+
+In the relational database world, you solve new query patterns by adding a Secondary Index. In the Cassandra world, storage is incredibly cheap, but CPU and network hops are expensive.
+
+To solve the dashboard problem, you **write the same data multiple times into completely different tables** structured for specific reads.
+
+When the Flink stream processor emits a 1-minute aggregated bucket, it doesn't write to one table; it writes to three:
+
+1. **Table 1 (For the Ad View):** Partition Key: `ad_id`.
+2. **Table 2 (For the Campaign View):** Partition Key: `campaign_id`.
+3. **Table 3 (For the Geography View):** Partition Key: `country`.
+
+Now, no matter which dropdown the advertiser clicks on the dashboard, the backend API queries a table that is specifically partitioned for that exact request, guaranteeing millisecond reads.
+
+### 4. The Modern Senior Engineer Alternative: Real-Time OLAP
+
+While Cassandra *can* power these dashboards via heavy denormalization, the modern industry standard for this specific problem (high-throughput ingestion + complex dashboard filtering) is to use a **Real-Time OLAP Database**.
+
+Technologies like **Apache Druid**, **Apache Pinot**, or **ClickHouse** are purpose-built for exactly this.
+
+* They can ingest millions of streaming events per second directly from Kafka.
+* They automatically index *every single column*.
+* They allow advertisers to dynamically slice, dice, and filter by `ad_id`, `country`, `device_type`, or `campaign_id` in milliseconds without you having to maintain 10 different denormalized Cassandra tables.
+
+---
+
+In an interview, starting with Cassandra for the hot store shows you understand high-scale writes. Pivoting to acknowledge its read limitations and suggesting data denormalization—or proposing Apache Druid for complex dashboards—proves you have Senior-level foresight.
